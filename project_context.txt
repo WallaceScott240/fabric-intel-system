@@ -1,0 +1,224 @@
+Project file structure:
+=======================
+./
+    .env
+    README.md
+    app.py
+    requirements.txt
+    .streamlit/
+        config.toml
+    src/
+        __init__.py
+        ai_engine.py
+        fabric_logic.py
+        pdf_generator.py
+
+
+File Contents:
+===============
+
+
+--- FILE: .env ---
+
+GROQ_API_KEY=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
+
+--- FILE: README.md ---
+
+
+
+--- FILE: app.py ---
+
+import streamlit as st
+import uuid
+from src.ai_engine import get_fabric_recommendation
+from src.pdf_generator import export_to_pdf
+
+st.set_page_config(page_title="Fabric Intel AI", page_icon="🧵", layout="wide")
+
+# Session State
+if "conversations" not in st.session_state:
+    st.session_state.conversations = {}
+if "current_chat_id" not in st.session_state:
+    st.session_state.current_chat_id = str(uuid.uuid4())
+    st.session_state.conversations[st.session_state.current_chat_id] = []
+
+# Sidebar
+with st.sidebar:
+    st.title("🧵 Fabric Intel")
+    if st.button("➕ New Analysis", use_container_width=True):
+        st.session_state.current_chat_id = str(uuid.uuid4())
+        st.session_state.conversations[st.session_state.current_chat_id] = []
+        st.rerun()
+    
+    st.divider()
+    st.subheader("History")
+    for cid in reversed(list(st.session_state.conversations.keys())):
+        history = st.session_state.conversations[cid]
+        label = history[0]["content"][:20] + "..." if history else "Empty Chat"
+        if st.button(label, key=cid, use_container_width=True):
+            st.session_state.current_chat_id = cid
+            st.rerun()
+
+# Main Chat Interface
+st.title("Fabric-to-Garment Advisor")
+st.caption("Detailed Technical Recommendations | Powered by Llama 3.3 & Groq")
+
+current_history = st.session_state.conversations[st.session_state.current_chat_id]
+
+# Starter Prompts
+if not current_history:
+    st.write("### Choose a starting point:")
+    cols = st.columns(2)
+    starters = [
+        "Premium Linen set for South Asian Summer",
+        "High-performance Winter Sportswear",
+        "Sustainable Silk Blouse for Luxury Market",
+        "Durable Denim Workwear Jacket"
+    ]
+    for i, s in enumerate(starters):
+        if cols[i%2].button(s, use_container_width=True):
+            prompt = s
+            current_history.append({"role": "user", "content": prompt})
+            with st.spinner("Analyzing..."):
+                res = get_fabric_recommendation(current_history)
+                current_history.append({"role": "assistant", "content": res})
+            st.rerun()
+
+# Display Messages
+for i, msg in enumerate(current_history):
+    with st.chat_message(msg["role"]):
+        st.markdown(msg["content"])
+        if msg["role"] == "assistant":
+            pdf_data = export_to_pdf(msg["content"])
+            st.download_button(
+                "📥 Download PDF Report", 
+                data=pdf_data, 
+                file_name=f"Report_{i}.pdf", 
+                mime="application/pdf",
+                key=f"btn_{st.session_state.current_chat_id}_{i}"
+            )
+
+# Chat Input
+if user_input := st.chat_input("Describe the garment, market, and season..."):
+    current_history.append({"role": "user", "content": user_input})
+    with st.chat_message("user"):
+        st.markdown(user_input)
+    
+    with st.chat_message("assistant"):
+        with st.spinner("Consulting Textile Intelligence Stack..."):
+            response = get_fabric_recommendation(current_history)
+            st.markdown(response)
+            pdf_data = export_to_pdf(response)
+            st.download_button("📥 Download PDF Report", data=pdf_data, file_name="Report.pdf", mime="application/pdf")
+    
+    current_history.append({"role": "assistant", "content": response})
+    st.session_state.conversations[st.session_state.current_chat_id] = current_history
+
+--- FILE: requirements.txt ---
+
+streamlit
+groq
+python-dotenv
+fpdf2
+
+--- FILE: .streamlit/config.toml ---
+
+[theme]
+primaryColor = "#2E4053"
+backgroundColor = "#FDFEFE"
+secondaryBackgroundColor = "#F4F6F7"
+textColor = "#1C2833"
+font = "sans serif"
+
+[server]
+headless = true
+enableCORS = false
+
+--- FILE: src/__init__.py ---
+
+
+
+--- FILE: src/ai_engine.py ---
+
+import os
+from groq import Groq
+from dotenv import load_dotenv
+from src.fabric_logic import FABRIC_KNOWLEDGE
+
+load_dotenv()
+client = Groq(api_key=os.getenv("GROQ_API_KEY"))
+
+def get_fabric_recommendation(messages):
+    system_prompt = {
+        "role": "system", 
+        "content": FABRIC_KNOWLEDGE
+    }
+    
+    try:
+        completion = client.chat.completions.create(
+            model="llama-3.3-70b-versatile",
+            messages=[system_prompt] + messages,
+            temperature=0.6,
+            max_tokens=3000,
+            stream=False
+        )
+        return completion.choices[0].message.content
+    except Exception as e:
+        return f"Error connecting to Groq: {str(e)}"
+
+--- FILE: src/fabric_logic.py ---
+
+FABRIC_KNOWLEDGE = """
+You are a Senior Textile Engineer specializing in the 'Textile Intelligence Stack'. 
+Provide a comprehensive Technical Specification Report based on the following research data:
+
+DATASET RULES:
+- Summer/Casual: Cotton (simple), Linen (lightweight, 150-180 GSM).
+- Workwear/Jeans: Cotton Twill or Denim (sturdy, structured, high durability).
+- Hot/Humid/Formal: Silk (smooth, glossy, high drape, formal attire).
+- Sportswear/Linings: Polyester (Wrinkle-resistant, moisture-management).
+- Cold/Temperate: Wool (woven, warm, structured).
+
+REPORT STRUCTURE:
+1. PRIMARY MATERIAL ARCHITECTURE: Fiber composition, exact GSM, weave type, and blend alternatives.
+2. AESTHETIC & FUNCTIONAL PROFILE: Drape, hand-feel, and performance (breathability/stretch).
+3. MANUFACTURING SPECS: Pre-treatments (Enzyme-wash, etc.), construction notes, and washability.
+4. SUSTAINABILITY: Recommended organic/recycled substitutes (TENCEL, GRS Poly) and certifications.
+5. MARKET INTELLIGENCE: Pricing tier (INR), peak demand window, and confidence score (%).
+
+INSTRUCTIONS: 
+- Be highly technical and detailed. 
+- Use specific GSM numbers and treatment names.
+- Explain the 'Why' behind every recommendation.
+"""
+
+--- FILE: src/pdf_generator.py ---
+
+from fpdf import FPDF
+import datetime
+
+class FabricPDF(FPDF):
+    def header(self):
+        self.set_font("helvetica", "B", 14)
+        self.cell(0, 10, "Textile Intelligence Stack - Technical Report", ln=True, align="C")
+        self.set_font("helvetica", "I", 9)
+        self.cell(0, 5, f"Generated: {datetime.datetime.now().strftime('%Y-%m-%d %H:%M')}", ln=True, align="C")
+        self.ln(10)
+
+def export_to_pdf(text):
+    pdf = FabricPDF()
+    pdf.add_page()
+    pdf.set_font("helvetica", size=11)
+    
+    # Professional Cleanup: Remove characters that break standard PDF fonts
+    clean_text = text.replace("🧵", "Fabric:").replace("📈", "Data:").replace("🌍", "Eco:")
+    clean_text = clean_text.replace("✨", "").replace("🛠️", "Process:").replace("🟢", "-")
+    clean_text = clean_text.replace("**", "").replace("### ", "")
+    
+    # Safe encoding for Latin-1
+    clean_text = clean_text.encode('latin-1', 'replace').decode('latin-1')
+    
+    pdf.multi_cell(0, 8, txt=clean_text)
+    
+    # FIX: Ensure we return bytes, not bytearray
+    return bytes(pdf.output())
