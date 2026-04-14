@@ -3,26 +3,44 @@ import uuid
 from src.ai_engine import get_fabric_recommendation
 from src.pdf_generator import export_to_pdf
 
+from streamlit_echarts import st_echarts
+
 def parse_metrics(text):
     if "METRIC_DATA:" in text:
         try:
-            parts = text.split("METRIC_DATA:")[1].split("|")
-            gsm = parts[0].replace("GSM:", "").strip()
-            durability = parts[1].replace("DURABILITY:", "").strip()
-            price = parts[2].replace("PRICE:", "").strip()
-            return {"GSM": gsm, "Durability": durability, "Price": price}
-        except:
-            return None
+            p = text.split("METRIC_DATA:")[1].split("|")
+            return {
+                "GSM": p[0].split(":")[1],
+                "DUR": int(p[1].split(":")[1]),
+                "BRE": int(p[2].split(":")[1]),
+                "SUS": int(p[3].split(":")[1]),
+                "Price": p[4].split(":")[1],
+                "COST": int(p[5].split(":")[1])
+            }
+        except: return None
     return None
+
+def render_performance_radar(m):
+    options = {
+        "radar": {"indicator": [
+            {"name": "Durability", "max": 100}, {"name": "Breathability", "max": 100},
+            {"name": "Sustainability", "max": 100}, {"name": "Cost Efficiency", "max": 100}
+        ]},
+        "series": [{"type": "radar", "data": [{"value": [m["DUR"], m["BRE"], m["SUS"], m["COST"]], 
+                    "areaStyle": {"color": "#2E4053", "opacity": 0.4}}]}]
+    }
+    st_echarts(options, height="300px")
 
 def render_ui_components(content):
     metrics = parse_metrics(content)
     if metrics:
-        # Technical Metric Dashboard
-        cols = st.columns(3)
-        cols[0].metric("Target Weight", metrics["GSM"])
-        cols[1].metric("Durability Rating", metrics["Durability"])
-        cols[2].metric("Market Tier", metrics["Price"])
+        col1, col2 = st.columns([1, 1])
+        with col1:
+            st.metric("Target Weight", metrics["GSM"])
+            st.metric("Market Tier", metrics["Price"])
+            st.metric("Eco-Score", f"{metrics['SUS']}/100")
+        with col2:
+            render_performance_radar(metrics)
         
         # Styled Care Label
         st.markdown(f"""
@@ -31,6 +49,29 @@ def render_ui_components(content):
             <p style="margin:5px 0; font-size: 0.9em;">Standard Industrial Grade | Heat Resistance: { "High" if "Denim" in content or "Cotton" in content else "Low" } | Bio-degradable: Yes</p>
         </div>
         """, unsafe_allow_html=True)
+
+        # Buyer Insights Section
+        render_buyer_insights(content)
+
+def render_buyer_insights(content):
+    with st.expander("🇮🇳 Indian Market & Buyer Match", expanded=True):
+        col1, col2 = st.columns(2)
+        
+        # Simple extraction logic for UI highlighting
+        hub = "Not Specified"
+        if "Hub:" in content: hub = content.split("Hub:")[1].split("\n")[0]
+        elif "HUB:" in content: hub = content.split("HUB:")[1].split("\n")[0]
+        
+        with col1:
+            st.markdown("#### 🏢 Targeted Buyer Segments")
+            if "Export" in content: st.info("🎯 **Primary:** International Export Houses")
+            if "Retail" in content or "Domestic" in content: st.info("🛍️ **Primary:** Domestic Retail Chains (Westside/Reliance)")
+            if "Boutique" in content: st.info("👗 **Primary:** Premium Designer Boutiques")
+            
+        with col2:
+            st.markdown("#### 📍 Sourcing/Production Hub")
+            st.success(f"**Recommended Location:** {hub}")
+            st.caption("Strategic hub based on material availability and labor expertise.")
 
 st.set_page_config(page_title="Fabric Intel AI", page_icon="🧵", layout="wide")
 
@@ -91,11 +132,13 @@ for i, msg in enumerate(current_history):
         
         if msg["role"] == "assistant":
             render_ui_components(msg["content"]) # Added Dashboard/Label
-            pdf_data = export_to_pdf(display_text)
+            # Parse metrics again for the PDF generator
+            m_obj = parse_metrics(msg["content"])
+            pdf_data = export_to_pdf(display_text, metrics=m_obj)
             st.download_button(
-                "📥 Download PDF Report", 
+                "📥 Download Tech-Spec PDF", 
                 data=pdf_data, 
-                file_name=f"Report_{i}.pdf", 
+                file_name=f"TechSpec_{i}.pdf", 
                 mime="application/pdf",
                 key=f"btn_{st.session_state.current_chat_id}_{i}"
             )
@@ -112,8 +155,9 @@ if user_input := st.chat_input("Describe the garment, market, and season..."):
             clean_display = response.split("METRIC_DATA:")[0]
             st.markdown(clean_display)
             render_ui_components(response) # Added Dashboard/Label
-            pdf_data = export_to_pdf(clean_display)
-            st.download_button("📥 Download PDF Report", data=pdf_data, file_name="Report.pdf", mime="application/pdf")
+            m_obj = parse_metrics(response)
+            pdf_data = export_to_pdf(clean_display, metrics=m_obj)
+            st.download_button("📥 Download Tech-Spec PDF", data=pdf_data, file_name="Report.pdf", mime="application/pdf")
     
     current_history.append({"role": "assistant", "content": response})
     st.session_state.conversations[st.session_state.current_chat_id] = current_history
